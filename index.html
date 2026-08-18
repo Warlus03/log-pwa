@@ -418,6 +418,41 @@ function parseText(raw){
   };
 }
 
+/* ---------------- まとめて転送されたときに切り分ける ---------------- */
+// LINEから複数まとめて転送されると、全部が1つの長いテキストで届く。
+// 「会員番号」の行を目印に人数分へ切り分ける。区切りは直前の「合計料金」の
+// 次の行。そのあとに続く空行と※の行は、前の記録のものとして扱う。
+function splitBlocks(raw){
+  const lines = String(raw||'').replace(/\r/g,'').split('\n');
+  const marks = [];
+  lines.forEach((l,i)=>{ if(/^[\s　]*会員番号[\s　]*[:：]/.test(l)) marks.push(i); });
+  if(marks.length <= 1) return [String(raw||'').trim()].filter(Boolean);
+
+  const cuts = [0];
+  for(let k=1;k<marks.length;k++){
+    let end = -1;
+    for(let i=marks[k]-1;i>marks[k-1];i--){
+      if(/^[\s　]*合計料金[\s　]*[:：]/.test(lines[i])){ end = i; break; }
+    }
+    let cut;
+    if(end >= 0){
+      cut = end + 1;
+      while(cut < marks[k] && (!lines[cut].trim() || /^[\s　]*※/.test(lines[cut]))) cut++;
+    }else{
+      cut = marks[k];
+    }
+    cuts.push(cut);
+  }
+  cuts.push(lines.length);
+
+  const out = [];
+  for(let k=0;k<cuts.length-1;k++){
+    const chunk = lines.slice(cuts[k], cuts[k+1]).join('\n').trim();
+    if(chunk) out.push(chunk);
+  }
+  return out;
+}
+
 /* ---------------- 業務日 ---------------- */
 const WD='日月火水木金土';
 function toDate(ymd,hm){
@@ -538,26 +573,47 @@ function openDetail(id, focusMemo){
 }
 
 /* ---------------- 追加 ---------------- */
-function addFromText(raw, opts){
-  const text = String(raw||'').trim();
-  if(!text){ toast('本文が空でした'); return null; }
+function addOne(text){
   const p = parseText(text);
   const dup = RECORDS.find(r=>r.no && r.no===p.no && r.ymd===p.ymd && r.hm===p.hm);
-  if(dup){
-    toast('もう入ってます');
-    openDetail(dup.id);
-    return null;
-  }
+  if(dup) return {dup:dup};
   const rec = Object.assign({
     id: Date.now().toString(36)+Math.random().toString(36).slice(2,7),
     memo:'', raw:text, createdAt:Date.now()
   }, p);
   RECORDS.push(rec);
   dbPut(rec);
+  return {rec:rec};
+}
+
+function addFromText(raw, opts){
+  const text = String(raw||'').trim();
+  if(!text){ toast('本文が空でした'); return null; }
+
+  const blocks = splitBlocks(text);
+  const added = [], dups = [];
+  blocks.forEach(b=>{
+    const r = addOne(b);
+    if(r.rec) added.push(r.rec); else dups.push(r.dup);
+  });
   renderList();
-  if(!p.no && !p.ymd) toast('項目が読めなかったので、原文だけ残しました');
-  openDetail(rec.id, opts && opts.focus);
-  return rec;
+
+  // 1件だけのとき: そのまま詳細を開いてメモを書ける状態にする
+  if(blocks.length === 1){
+    if(added.length){
+      if(!added[0].no && !added[0].ymd) toast('項目が読めなかったので、原文だけ残しました');
+      openDetail(added[0].id, opts && opts.focus);
+      return added[0];
+    }
+    toast('もう入ってます');
+    openDetail(dups[0].id);
+    return null;
+  }
+
+  // まとめて来たとき: 一覧に戻して、メモは後から書いてもらう
+  show('s-list');
+  toast(`${added.length}件追加しました` + (dups.length ? `（${dups.length}件はもう入ってました）` : ''));
+  return null;
 }
 
 /* ---------------- 起動 ---------------- */
