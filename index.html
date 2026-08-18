@@ -48,6 +48,12 @@ input,textarea{font:inherit;color:inherit}
 .search input{flex:1;border:none;background:transparent;outline:none;min-width:0}
 .search input::placeholder{color:var(--muted)}
 .search .clear{color:var(--muted);font-size:18px;padding:0 2px;display:none}
+.search .kbd{
+  flex:none;min-width:34px;text-align:center;font-size:13px;font-weight:600;
+  color:var(--accent-dark);background:var(--accent-soft);
+  border:0.5px solid var(--accent);border-radius:8px;padding:3px 8px;
+}
+.search .kbd:active{background:var(--badge)}
 
 /* ---- 書き出しの案内 ---- */
 .remind{
@@ -191,6 +197,7 @@ input,textarea{font:inherit;color:inherit}
       <span aria-hidden="true" style="color:var(--accent)">⌕</span>
       <input id="q" type="search" inputmode="numeric" placeholder="会員番号 か 名前" autocomplete="off">
       <button class="clear" id="q-clear" aria-label="消す">×</button>
+      <button class="kbd" id="q-kbd" aria-label="キーボードを切り替える">あ</button>
     </div>
   </div>
 
@@ -652,12 +659,24 @@ async function doImport(file){
 }
 
 /* ---------------- 操作 ---------------- */
-document.getElementById('q').addEventListener('input', e=>{
-  e.target.inputMode = /[^0-9]/.test(e.target.value) ? 'text' : 'numeric';
-  renderList();
+// 日本語入力の変換中は、検索も画面の描き直しもしない。
+// 入力中に inputMode を書き換えるとAndroidのIMEが再起動してしまうため、
+// キーボードの切り替えは手動のボタンだけにしている。
+const qEl = document.getElementById('q');
+const kbdBtn = document.getElementById('q-kbd');
+let composing = false;
+qEl.addEventListener('compositionstart', ()=>{ composing = true; });
+qEl.addEventListener('compositionend',   ()=>{ composing = false; renderList(); });
+qEl.addEventListener('input', ()=>{ if(!composing) renderList(); });
+kbdBtn.addEventListener('click', ()=>{
+  const toKana = qEl.inputMode !== 'text';
+  qEl.inputMode = toKana ? 'text' : 'numeric';
+  kbdBtn.textContent = toKana ? '123' : 'あ';
+  qEl.blur();
+  setTimeout(()=>qEl.focus(), 0);
 });
 document.getElementById('q-clear').addEventListener('click',()=>{
-  const q=document.getElementById('q'); q.value=''; q.inputMode='numeric'; renderList(); q.focus();
+  qEl.value=''; renderList(); qEl.focus();
 });
 document.getElementById('go-settings').addEventListener('click',()=>{ renderRemind(); show('s-settings'); });
 document.getElementById('back-1').addEventListener('click',()=>{ renderList(); show('s-list'); });
