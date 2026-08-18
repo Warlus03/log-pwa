@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>log</title>
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#EDE8DC">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<style>
+:root{
+  --bg:#EDE8DC; --surface:#FAF6EC; --surface2:#F2ECDD; --field:#FFFDF7;
+  --ink:#2C2A24; --sub:#5F5A4E; --muted:#8A8271; --line:#DDD5C2;
+  --accent:#BA7517; --accent-dark:#854F0B; --accent-soft:#F5EAD3; --badge:#FAC775;
+  --radius:10px;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--bg); color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP","Yu Gothic UI",sans-serif;
+  font-size:15px; line-height:1.6;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+button{font:inherit;color:inherit;border:none;background:none;cursor:pointer}
+input,textarea{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---- 上部 ---- */
+.top{
+  position:sticky;top:0;z-index:20;background:var(--bg);
+  padding:calc(10px + env(safe-area-inset-top)) 12px 8px;
+}
+.toprow{display:flex;align-items:center;gap:10px}
+.brand{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600;letter-spacing:.06em}
+.brand img{width:24px;height:24px;border-radius:6px;display:block}
+.spacer{flex:1}
+.iconbtn{
+  width:38px;height:38px;border-radius:50%;display:grid;place-items:center;
+  color:var(--sub);font-size:18px;
+}
+.iconbtn:active{background:var(--surface2)}
+.search{
+  margin-top:8px;display:flex;align-items:center;gap:8px;
+  background:var(--surface);border:0.5px solid var(--line);border-radius:var(--radius);
+  padding:9px 12px;
+}
+.search input{flex:1;border:none;background:transparent;outline:none;min-width:0}
+.search input::placeholder{color:var(--muted)}
+.search .clear{color:var(--muted);font-size:18px;padding:0 2px;display:none}
+
+/* ---- 書き出しの案内 ---- */
+.remind{
+  margin:8px 12px 0;background:var(--accent-soft);border-left:3px solid var(--accent);
+  border-radius:var(--radius);padding:9px 12px;font-size:13px;color:var(--accent-dark);
+  display:none;align-items:center;gap:10px;
+}
+.remind button{font-size:13px;font-weight:600;color:var(--accent-dark);text-decoration:underline;white-space:nowrap}
+
+/* ---- 一覧 ---- */
+.list{padding:8px 12px 96px}
+.daybar{
+  display:flex;justify-content:space-between;align-items:center;
+  background:var(--accent-soft);border-left:3px solid var(--accent);
+  padding:5px 11px;margin:14px 0 0;border-radius:4px;
+  font-size:12px;font-weight:600;color:var(--accent-dark);
+}
+.daybar .n{font-weight:400}
+.card{
+  background:var(--surface);border:0.5px solid var(--line);border-radius:var(--radius);
+  padding:11px 13px;margin-top:8px;display:block;width:100%;text-align:left;
+}
+.card:active{background:var(--surface2)}
+.card .r1{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.card .no{font-size:16px;font-weight:600;letter-spacing:.02em}
+.card .time{font-size:12px;color:var(--muted);flex:none}
+.card .r2{font-size:13px;color:var(--sub);margin-top:3px}
+.card .memo{font-size:13px;margin-top:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.badge{
+  display:inline-block;font-size:11px;font-weight:500;background:var(--badge);color:var(--accent-dark);
+  padding:1px 8px;border-radius:8px;margin-left:7px;vertical-align:1px;
+}
+.blank{
+  display:inline-block;font-size:11px;background:var(--bg);color:var(--sub);
+  padding:2px 8px;border-radius:8px;margin-top:5px;
+}
+.empty{text-align:center;color:var(--muted);font-size:14px;padding:56px 24px;line-height:2}
+
+/* ---- 追加ボタン ---- */
+.fab{
+  position:fixed;right:16px;bottom:calc(18px + env(safe-area-inset-bottom));z-index:30;
+  width:56px;height:56px;border-radius:50%;background:var(--accent);color:#fff;
+  font-size:28px;display:grid;place-items:center;box-shadow:0 3px 10px rgba(60,40,10,.28);
+}
+.fab:active{background:var(--accent-dark)}
+
+/* ---- 画面 ---- */
+.screen{display:none}
+.screen.on{display:block}
+.sheet{padding:0 12px 96px}
+.sheethead{
+  position:sticky;top:0;z-index:20;background:var(--bg);
+  padding:calc(10px + env(safe-area-inset-top)) 12px 8px;margin:0 -12px;
+  display:flex;align-items:center;gap:6px;
+}
+.sheethead .title{font-size:15px;font-weight:600}
+
+.panel{background:var(--surface);border:0.5px solid var(--line);border-radius:12px;padding:14px;margin-top:8px}
+.eyebrow{font-size:12px;color:var(--muted)}
+.big{font-size:22px;font-weight:600;margin-top:2px;letter-spacing:.02em}
+.sub{font-size:14px;color:var(--sub);margin-top:2px}
+.lbl{font-size:12px;color:var(--muted);margin:16px 0 5px}
+.memofield{
+  width:100%;background:var(--field);border:0.5px solid var(--accent);border-radius:var(--radius);
+  padding:11px;font-size:14px;line-height:1.75;min-height:92px;resize:vertical;outline:none;
+}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:6px}
+.cell{background:var(--surface2);border-radius:var(--radius);padding:8px 10px;min-width:0}
+.cell .k{font-size:11px;color:var(--muted)}
+.cell .v{font-size:14px;line-height:1.5;word-break:break-word}
+.cell.wide{grid-column:1 / -1}
+.foldbtn{
+  display:flex;align-items:center;gap:7px;width:100%;
+  border-top:0.5px solid var(--line);margin-top:16px;padding-top:11px;color:var(--sub);font-size:13px;
+}
+.foldbtn .caret{transition:transform .15s}
+.foldbtn[aria-expanded="true"] .caret{transform:rotate(90deg)}
+.fold{display:none;margin-top:10px}
+.fold.on{display:block}
+.rawfield{
+  width:100%;background:var(--field);border:0.5px solid var(--line);border-radius:var(--radius);
+  padding:11px;font-size:13px;line-height:1.7;min-height:200px;resize:vertical;outline:none;
+  white-space:pre-wrap;
+}
+.rowbtns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.btn{
+  border:0.5px solid var(--line);background:var(--surface2);border-radius:var(--radius);
+  padding:9px 14px;font-size:13px;font-weight:500;
+}
+.btn:active{background:var(--line)}
+.btn.main{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn.main:active{background:var(--accent-dark)}
+.btn.danger{color:#9A2A2A}
+.btn.wide{flex:1;text-align:center}
+
+/* ---- 設定 ---- */
+.setrow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:0.5px solid var(--line)}
+.setrow:last-child{border-bottom:none}
+.setrow .k{font-size:14px}
+.setrow .d{font-size:12px;color:var(--muted);margin-top:1px}
+.setrow select,.setrow input[type=number]{
+  background:var(--field);border:0.5px solid var(--line);border-radius:8px;padding:7px 9px;font-size:14px;
+}
+.howto{font-size:13px;color:var(--sub);line-height:1.9}
+.howto ol{padding-left:1.25em;margin:6px 0}
+.howto code{background:var(--surface2);padding:1px 5px;border-radius:4px;font-size:12px}
+
+/* ---- 貼り付け ---- */
+.modal{
+  position:fixed;inset:0;z-index:60;background:rgba(44,42,36,.45);
+  display:none;align-items:flex-end;
+}
+.modal.on{display:flex}
+.modalbox{
+  background:var(--bg);width:100%;border-radius:16px 16px 0 0;padding:16px 14px calc(18px + env(safe-area-inset-bottom));
+}
+.modalbox h2{font-size:15px;margin:0 0 4px}
+.modalbox p{font-size:12px;color:var(--muted);margin:0 0 10px}
+
+/* ---- 通知 ---- */
+.toast{
+  position:fixed;left:50%;bottom:calc(88px + env(safe-area-inset-bottom));transform:translateX(-50%);
+  background:var(--ink);color:#FAF6EC;padding:10px 16px;border-radius:20px;font-size:13px;
+  z-index:80;opacity:0;pointer-events:none;transition:opacity .2s;max-width:88vw;text-align:center;
+}
+.toast.on{opacity:1}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ============ 一覧 ============ -->
+<div class="screen on" id="s-list">
+  <div class="top">
+    <div class="toprow">
+      <div class="brand"><img src="./icon-192.png" alt="">log</div>
+      <div class="spacer"></div>
+      <button class="iconbtn" id="go-settings" aria-label="設定">⚙</button>
+    </div>
+    <div class="search">
+      <span aria-hidden="true" style="color:var(--accent)">⌕</span>
+      <input id="q" type="search" inputmode="numeric" placeholder="会員番号 か 名前" autocomplete="off">
+      <button class="clear" id="q-clear" aria-label="消す">×</button>
+    </div>
+  </div>
+
+  <div class="remind" id="remind">
+    <span id="remind-text"></span>
+    <span class="spacer"></span>
+    <button id="remind-go">書き出す</button>
+  </div>
+
+  <div class="list" id="list"></div>
+  <button class="fab" id="go-paste" aria-label="貼り付けて追加">＋</button>
+</div>
+
+<!-- ============ 詳細 ============ -->
+<div class="screen" id="s-detail">
+  <div class="sheet">
+    <div class="sheethead">
+      <button class="iconbtn" id="back-1" aria-label="戻る">‹</button>
+      <span class="title">記録</span>
+    </div>
+
+    <div class="panel">
+      <div class="eyebrow" id="d-date"></div>
+      <div class="big" id="d-no"></div>
+      <div class="sub" id="d-name"></div>
+
+      <div class="lbl">メモ</div>
+      <textarea class="memofield" id="d-memo" placeholder="ここに書く"></textarea>
+
+      <div class="grid" id="d-grid"></div>
+
+      <button class="foldbtn" id="d-fold" aria-expanded="false">
+        <span class="caret" aria-hidden="true">›</span><span>LINE原文</span>
+      </button>
+      <div class="fold" id="d-foldbody">
+        <textarea class="rawfield" id="d-raw"></textarea>
+        <div class="rowbtns">
+          <button class="btn" id="d-reparse">原文から読み直す</button>
+        </div>
+        <div class="eyebrow" style="margin-top:8px">読み直すと、上の項目を原文から作り直します。メモは消えません。</div>
+      </div>
+
+      <div class="rowbtns" style="margin-top:18px">
+        <button class="btn danger" id="d-del">この記録を消す</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 設定 ============ -->
+<div class="screen" id="s-settings">
+  <div class="sheet">
+    <div class="sheethead">
+      <button class="iconbtn" id="back-2" aria-label="戻る">‹</button>
+      <span class="title">設定</span>
+    </div>
+
+    <div class="panel">
+      <div class="setrow">
+        <div>
+          <div class="k">1日の区切り</div>
+          <div class="d">この時刻より前は前日の分として数えます</div>
+        </div>
+        <select id="set-cutoff"></select>
+      </div>
+      <div class="setrow">
+        <div>
+          <div class="k">回数を出しはじめる</div>
+          <div class="d">これ未満のときはバッジを出しません</div>
+        </div>
+        <select id="set-threshold">
+          <option value="2">2回目から</option>
+          <option value="3">3回目から</option>
+          <option value="5">5回目から</option>
+          <option value="9999">出さない</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="k" style="font-size:14px;font-weight:600">データ</div>
+      <div class="eyebrow" style="margin-top:4px">中身はこの端末の中だけにあります。どこにも送られません。</div>
+      <div class="rowbtns" style="margin-top:12px">
+        <button class="btn main wide" id="do-export">書き出す</button>
+        <button class="btn wide" id="do-import">読み込む</button>
+      </div>
+      <input type="file" id="file" accept="application/json,.json" hidden>
+      <div class="eyebrow" id="export-state" style="margin-top:10px"></div>
+    </div>
+
+    <div class="panel">
+      <div class="k" style="font-size:14px;font-weight:600">機種変・移行のしかた</div>
+      <div class="howto">
+        <ol>
+          <li>古い端末で「書き出す」を押す。ファイルが1個できる</li>
+          <li>そのファイルを Google ドライブなど、端末の外に置く</li>
+          <li>新しい端末で同じURLを開き、メニューから「ホーム画面に追加」</li>
+          <li>設定を開いて「読み込む」→ さっきのファイルを選ぶ</li>
+        </ol>
+        データは端末のブラウザの中にあるので、機種変のバックアップでは運ばれません。<strong>書き出しだけが移行手段です。</strong>
+        アプリ本体はいつでも同じURLから復活します。守るのはデータだけ。
+        <div style="margin-top:8px">このアプリの場所：<br><code id="selfurl"></code></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="k" style="font-size:14px;font-weight:600">回数の下駄</div>
+      <div class="eyebrow" style="margin-top:4px">このアプリを使う前の来店ぶんを足せます。会員番号ごと。</div>
+      <div class="rowbtns" style="margin-top:10px">
+        <input id="off-no" inputmode="numeric" placeholder="会員番号"
+               style="flex:1;min-width:0;background:var(--field);border:0.5px solid var(--line);border-radius:8px;padding:9px 10px">
+        <input id="off-n" inputmode="numeric" type="number" placeholder="＋回"
+               style="width:88px;background:var(--field);border:0.5px solid var(--line);border-radius:8px;padding:9px 10px">
+        <button class="btn" id="off-save">足す</button>
+      </div>
+      <div class="eyebrow" id="off-list" style="margin-top:10px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============ 貼り付け ============ -->
+<div class="modal" id="paste">
+  <div class="modalbox">
+    <h2>貼り付けて追加</h2>
+    <p>LINEの本文をそのまま貼ってください</p>
+    <textarea class="rawfield" id="paste-raw" style="min-height:160px"></textarea>
+    <div class="rowbtns">
+      <button class="btn wide" id="paste-cancel">やめる</button>
+      <button class="btn main wide" id="paste-ok">追加する</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ============================================================
+   「log」
+   データは IndexedDB に入っていて、この端末から出ません。
+   ============================================================ */
+
+const SEASONS = {
+  spring:{accent:'#D4537E',dark:'#8E2F52',soft:'#FAE7EE',badge:'#F8B8CE'},
+  summer:{accent:'#1D9E75',dark:'#0F6B4E',soft:'#E0F3EB',badge:'#9FE0C6'},
+  autumn:{accent:'#BA7517',dark:'#854F0B',soft:'#F5EAD3',badge:'#FAC775'},
+  winter:{accent:'#378ADD',dark:'#1F5FA0',soft:'#E3EEF9',badge:'#A9CDF0'}
+};
+function applySeason(){
+  // 1ヶ月だけ先取りする
+  const m = ((new Date().getMonth() + 1) % 12) + 1;
+  const key = m<=2||m===12 ? 'winter' : m<=5 ? 'spring' : m<=8 ? 'summer' : 'autumn';
+  const s = SEASONS[key], r = document.documentElement.style;
+  r.setProperty('--accent',s.accent); r.setProperty('--accent-dark',s.dark);
+  r.setProperty('--accent-soft',s.soft); r.setProperty('--badge',s.badge);
+}
+applySeason();
+
+/* ---------------- 保存まわり ---------------- */
+function openDB(){
+  return new Promise((res,rej)=>{
+    const q = indexedDB.open('ichiran',1);
+    q.onupgradeneeded = ()=>{
+      const db=q.result;
+      if(!db.objectStoreNames.contains('records')) db.createObjectStore('records',{keyPath:'id'});
+      if(!db.objectStoreNames.contains('meta')) db.createObjectStore('meta',{keyPath:'k'});
+    };
+    q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error);
+  });
+}
+function tx(store,mode,fn){
+  return openDB().then(db=>new Promise((res,rej)=>{
+    const t=db.transaction(store,mode); const r=fn(t.objectStore(store));
+    t.oncomplete=()=>res(r&&r.result!==undefined?r.result:undefined);
+    t.onerror=()=>rej(t.error);
+  }));
+}
+const dbAll   = ()=>tx('records','readonly',s=>s.getAll());
+const dbPut   = r =>tx('records','readwrite',s=>s.put(r));
+const dbDel   = id=>tx('records','readwrite',s=>s.delete(id));
+const metaGet = k =>tx('meta','readonly',s=>s.get(k));
+const metaPut = o =>tx('meta','readwrite',s=>s.put(o));
+const metaDel = k =>tx('meta','readwrite',s=>s.delete(k));
+
+let RECORDS=[], SETTINGS={cutoff:5,threshold:2,lastExport:null}, OFFSETS={}, CURRENT=null;
+
+/* ---------------- LINE本文を読む ---------------- */
+function parseText(raw){
+  const lines = String(raw||'').replace(/\r/g,'').split('\n');
+  const v = {};
+  for(let i=0;i<lines.length;i++){
+    const m = lines[i].match(/^\s*([^:：\n]{1,10})\s*[:：]\s*(.*)$/);
+    if(!m) continue;
+    const key = m[1].replace(/[\s　]+/g,' ').trim();
+    let val = m[2].trim();
+    // 「セット:なし」の下に「 (0円)」がぶら下がる形に対応
+    const next = lines[i+1];
+    if(next && !/円/.test(val) && /^[\s　]*[(（].*円.*[)）][\s　]*$/.test(next)){
+      val = (val?val+' ':'') + next.trim(); i++;
+    }
+    if(v[key]===undefined) v[key]=val;
+  }
+  const dt = (v['日時']||'').match(/(\d{8})[\s　]*(\d{1,2}):(\d{2})/);
+  return {
+    no:      v['会員番号']||'',
+    name:    (v['お名前']||'').replace(/様$/,'').trim(),
+    nominate:v['指名']||'',
+    tel:     v['TEL']||v['Tel']||'',
+    ymd:     dt?dt[1]:'',
+    hm:      dt?(String(dt[2]).padStart(2,'0')+':'+dt[3]):'',
+    place:   v['場所']||'',
+    goA:     v['移動方法 向']||'',
+    goB:     v['移動方法 戻']||'',
+    plan:    v['プラン']||'',
+    fare:    v['交通費']||'',
+    set:     v['セット']||'',
+    off:     v['割引']||'',
+    total:   v['合計料金']||''
+  };
+}
+
+/* ---------------- 業務日 ---------------- */
+const WD='日月火水木金土';
+function toDate(ymd,hm){
+  if(!/^\d{8}$/.test(ymd)) return null;
+  const h=hm?parseInt(hm.slice(0,2),10):12, mi=hm?parseInt(hm.slice(3),10):0;
+  return new Date(+ymd.slice(0,4), +ymd.slice(4,6)-1, +ymd.slice(6,8), h, mi);
+}
+function businessDay(r){
+  const d = toDate(r.ymd,r.hm);
+  if(!d) return '00000000';
+  if(d.getHours() < SETTINGS.cutoff) d.setDate(d.getDate()-1);
+  return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
+}
+function dayLabel(bd){
+  if(bd==='00000000') return '日付なし';
+  const d=new Date(+bd.slice(0,4),+bd.slice(4,6)-1,+bd.slice(6,8));
+  return `${d.getMonth()+1}月${d.getDate()}日（${WD[d.getDay()]}）`;
+}
+function fullDate(r){
+  const d=toDate(r.ymd,r.hm);
+  if(!d) return '日付が読めませんでした';
+  return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${WD[d.getDay()]}）${r.hm}`;
+}
+const sortKey = r => (r.ymd||'00000000')+(r.hm||'00:00');
+
+/* ---------------- 回数 ---------------- */
+function visitNo(r){
+  if(!r.no) return 0;
+  const mine = RECORDS.filter(x=>x.no===r.no).sort((a,b)=>sortKey(a)<sortKey(b)?-1:1);
+  const idx = mine.findIndex(x=>x.id===r.id);
+  return (idx<0?mine.length:idx+1) + (OFFSETS[r.no]||0);
+}
+
+/* ---------------- 表示 ---------------- */
+function show(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id));
+  window.scrollTo(0,0);
+}
+let toastTimer;
+function toast(msg){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.classList.add('on');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('on'),2400);
+}
+const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+function renderList(){
+  const q = document.getElementById('q').value.trim();
+  document.getElementById('q-clear').style.display = q ? 'block' : 'none';
+
+  let rows = RECORDS.slice();
+  if(q){
+    const numeric = /^[0-9]+$/.test(q);
+    rows = rows.filter(r => numeric
+      ? String(r.no).startsWith(q)
+      : (r.name||'').includes(q) || (r.nominate||'').includes(q) || (r.place||'').includes(q));
+  }
+  rows.sort((a,b)=> sortKey(a)<sortKey(b) ? 1 : -1);
+
+  const box = document.getElementById('list');
+  if(!rows.length){
+    box.innerHTML = `<div class="empty">${RECORDS.length
+      ? '見つかりませんでした。<br>番号なら前から、名前なら一部でも探せます。'
+      : 'まだ空です。<br>LINEの本文を共有するか、右下の＋から追加できます。'}</div>`;
+    return;
+  }
+
+  let html='', lastDay='';
+  const counts={};
+  rows.forEach(r=>{ const b=businessDay(r); counts[b]=(counts[b]||0)+1; });
+
+  rows.forEach(r=>{
+    const bd = businessDay(r);
+    if(bd!==lastDay){
+      html += `<div class="daybar"><span>${dayLabel(bd)}</span><span class="n">${counts[bd]}件</span></div>`;
+      lastDay = bd;
+    }
+    const n = visitNo(r);
+    const badge = (n>=SETTINGS.threshold && n>1) ? `<span class="badge">${n}回目</span>` : '';
+    const memo = (r.memo||'').split('\n').find(l=>l.trim()) || '';
+    html += `<button class="card" data-id="${r.id}">
+      <div class="r1"><span class="no">${esc(r.no||'番号なし')}${badge}</span><span class="time">${esc(r.hm)}</span></div>
+      <div class="r2">${esc([r.name,r.place].filter(Boolean).join('　·　'))}</div>
+      ${memo ? `<div class="memo">${esc(memo)}</div>` : `<div><span class="blank">メモ未記入</span></div>`}
+    </button>`;
+  });
+  box.innerHTML = html;
+  box.querySelectorAll('.card').forEach(b=>b.addEventListener('click',()=>openDetail(b.dataset.id)));
+}
+
+function openDetail(id, focusMemo){
+  const r = RECORDS.find(x=>x.id===id);
+  if(!r) return;
+  CURRENT = r;
+  const n = visitNo(r);
+  document.getElementById('d-date').textContent = fullDate(r);
+  document.getElementById('d-no').innerHTML = esc(r.no||'番号なし') +
+    ((n>=SETTINGS.threshold && n>1) ? `<span class="badge">${n}回目</span>` : '');
+  document.getElementById('d-name').textContent =
+    [r.name, r.nominate?('指名 '+r.nominate):''].filter(Boolean).join('　·　');
+  document.getElementById('d-memo').value = r.memo||'';
+  document.getElementById('d-raw').value = r.raw||'';
+
+  const cells = [
+    ['場所',r.place,true],['合計',r.total,false],['移動 向',r.goA,false],['移動 戻',r.goB,false],
+    ['プラン',r.plan,true],['交通費',r.fare,false],['セット',r.set,false],['割引',r.off,false],['TEL',r.tel,true]
+  ].filter(c=>c[1]);
+  document.getElementById('d-grid').innerHTML = cells.map(([k,v,wide])=>
+    `<div class="cell${wide?' wide':''}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
+
+  document.getElementById('d-fold').setAttribute('aria-expanded','false');
+  document.getElementById('d-foldbody').classList.remove('on');
+  show('s-detail');
+  if(focusMemo){
+    const m=document.getElementById('d-memo');
+    setTimeout(()=>{ m.focus(); m.setSelectionRange(m.value.length,m.value.length); },200);
+  }
+}
+
+/* ---------------- 追加 ---------------- */
+function addFromText(raw, opts){
+  const text = String(raw||'').trim();
+  if(!text){ toast('本文が空でした'); return null; }
+  const p = parseText(text);
+  const dup = RECORDS.find(r=>r.no && r.no===p.no && r.ymd===p.ymd && r.hm===p.hm);
+  if(dup){
+    toast('もう入ってます');
+    openDetail(dup.id);
+    return null;
+  }
+  const rec = Object.assign({
+    id: Date.now().toString(36)+Math.random().toString(36).slice(2,7),
+    memo:'', raw:text, createdAt:Date.now()
+  }, p);
+  RECORDS.push(rec);
+  dbPut(rec);
+  renderList();
+  if(!p.no && !p.ymd) toast('項目が読めなかったので、原文だけ残しました');
+  openDetail(rec.id, opts && opts.focus);
+  return rec;
+}
+
+/* ---------------- 起動 ---------------- */
+async function boot(){
+  const s = await metaGet('settings'); if(s) SETTINGS = Object.assign(SETTINGS, s.v||{});
+  const o = await metaGet('offsets');  if(o) OFFSETS = o.v||{};
+  RECORDS = await dbAll();
+
+  const sel=document.getElementById('set-cutoff');
+  sel.innerHTML = [0,1,2,3,4,5,6,7,8].map(h=>`<option value="${h}">朝${h}時</option>`).join('');
+  sel.value = SETTINGS.cutoff;
+  document.getElementById('set-threshold').value = SETTINGS.threshold;
+  document.getElementById('selfurl').textContent = location.href.split('?')[0].split('#')[0];
+
+  renderList();
+  renderOffsets();
+  renderRemind();
+
+  // 共有で届いた本文があれば取り込む
+  const pend = await metaGet('pending');
+  if(pend && pend.text){
+    await metaDel('pending');
+    addFromText(pend.text, {focus:true});
+  }
+  if(location.search) history.replaceState({}, '', location.pathname);
+}
+
+function renderRemind(){
+  const box=document.getElementById('remind');
+  if(!RECORDS.length){ box.style.display='none'; return; }
+  const last = SETTINGS.lastExport;
+  const days = last ? Math.floor((Date.now()-last)/86400000) : null;
+  if(days===null){
+    document.getElementById('remind-text').textContent='まだ一度も書き出していません';
+    box.style.display='flex';
+  }else if(days>=30){
+    document.getElementById('remind-text').textContent=`前の書き出しから${days}日たちました`;
+    box.style.display='flex';
+  }else{
+    box.style.display='none';
+  }
+  document.getElementById('export-state').textContent =
+    last ? `前回の書き出し：${new Date(last).toLocaleDateString('ja-JP')}` : 'まだ書き出していません';
+}
+
+function renderOffsets(){
+  const keys=Object.keys(OFFSETS).filter(k=>OFFSETS[k]);
+  document.getElementById('off-list').innerHTML = keys.length
+    ? keys.map(k=>`${esc(k)} ＋${OFFSETS[k]}回`).join('　/　') + '　（0を入れると取り消せます）'
+    : 'いまは何も足していません。';
+}
+
+/* ---------------- 書き出し・読み込み ---------------- */
+const HOWTO = [
+ 'これは「log」というアプリの書き出しファイルです。',
+ '戻し方: アプリを開く → 設定 → 「読み込む」 → このファイルを選ぶ。',
+ 'アプリ本体は下のURLにあります。端末を変えても、そこから開き直せます。'
+].join(' ');
+
+async function doExport(){
+  const data = {
+    _よみかた: HOWTO,
+    _アプリの場所: location.href.split('?')[0].split('#')[0],
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    settings: SETTINGS,
+    offsets: OFFSETS,
+    records: RECORDS
+  };
+  const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
+  const d = new Date();
+  const name = `log_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  SETTINGS.lastExport = Date.now();
+  await metaPut({k:'settings',v:SETTINGS});
+  renderRemind();
+  toast('書き出しました');
+}
+
+async function doImport(file){
+  try{
+    const data = JSON.parse(await file.text());
+    if(!Array.isArray(data.records)) throw new Error('形式がちがいます');
+    let added=0, skipped=0;
+    for(const r of data.records){
+      const dup = RECORDS.find(x => (x.id===r.id) || (x.no && x.no===r.no && x.ymd===r.ymd && x.hm===r.hm));
+      if(dup){ skipped++; continue; }
+      RECORDS.push(r); await dbPut(r); added++;
+    }
+    if(data.offsets){ OFFSETS = Object.assign(data.offsets, OFFSETS); await metaPut({k:'offsets',v:OFFSETS}); }
+    renderList(); renderOffsets();
+    toast(`${added}件読み込みました${skipped?`（${skipped}件は既にありました）`:''}`);
+  }catch(e){
+    toast('読み込めませんでした。ファイルを確かめてください');
+  }
+}
+
+/* ---------------- 操作 ---------------- */
+document.getElementById('q').addEventListener('input', e=>{
+  e.target.inputMode = /[^0-9]/.test(e.target.value) ? 'text' : 'numeric';
+  renderList();
+});
+document.getElementById('q-clear').addEventListener('click',()=>{
+  const q=document.getElementById('q'); q.value=''; q.inputMode='numeric'; renderList(); q.focus();
+});
+document.getElementById('go-settings').addEventListener('click',()=>{ renderRemind(); show('s-settings'); });
+document.getElementById('back-1').addEventListener('click',()=>{ renderList(); show('s-list'); });
+document.getElementById('back-2').addEventListener('click',()=>{ renderList(); show('s-list'); });
+document.getElementById('remind-go').addEventListener('click',doExport);
+
+document.getElementById('d-memo').addEventListener('input', e=>{
+  if(!CURRENT) return;
+  CURRENT.memo = e.target.value; dbPut(CURRENT);
+});
+document.getElementById('d-raw').addEventListener('input', e=>{
+  if(!CURRENT) return;
+  CURRENT.raw = e.target.value; dbPut(CURRENT);
+});
+document.getElementById('d-fold').addEventListener('click', e=>{
+  const b=e.currentTarget, open=b.getAttribute('aria-expanded')==='true';
+  b.setAttribute('aria-expanded', String(!open));
+  document.getElementById('d-foldbody').classList.toggle('on', !open);
+});
+document.getElementById('d-reparse').addEventListener('click', async ()=>{
+  if(!CURRENT) return;
+  Object.assign(CURRENT, parseText(CURRENT.raw));
+  await dbPut(CURRENT);
+  openDetail(CURRENT.id);
+  document.getElementById('d-fold').click();
+  toast('原文から読み直しました');
+});
+document.getElementById('d-del').addEventListener('click', async ()=>{
+  if(!CURRENT) return;
+  if(!confirm('この記録を消します。戻せません。')) return;
+  await dbDel(CURRENT.id);
+  RECORDS = RECORDS.filter(r=>r.id!==CURRENT.id);
+  CURRENT=null; renderList(); show('s-list'); toast('消しました');
+});
+
+document.getElementById('set-cutoff').addEventListener('change', async e=>{
+  SETTINGS.cutoff = +e.target.value; await metaPut({k:'settings',v:SETTINGS}); renderList();
+});
+document.getElementById('set-threshold').addEventListener('change', async e=>{
+  SETTINGS.threshold = +e.target.value; await metaPut({k:'settings',v:SETTINGS}); renderList();
+});
+document.getElementById('off-save').addEventListener('click', async ()=>{
+  const no=document.getElementById('off-no').value.trim();
+  const n=parseInt(document.getElementById('off-n').value,10);
+  if(!no || isNaN(n)){ toast('会員番号と回数を入れてください'); return; }
+  if(n) OFFSETS[no]=n; else delete OFFSETS[no];
+  await metaPut({k:'offsets',v:OFFSETS});
+  document.getElementById('off-no').value=''; document.getElementById('off-n').value='';
+  renderOffsets(); renderList(); toast('足しました');
+});
+
+document.getElementById('do-export').addEventListener('click',doExport);
+document.getElementById('do-import').addEventListener('click',()=>document.getElementById('file').click());
+document.getElementById('file').addEventListener('change', e=>{
+  const f=e.target.files[0]; if(f) doImport(f); e.target.value='';
+});
+
+const modal=document.getElementById('paste');
+document.getElementById('go-paste').addEventListener('click',()=>{
+  document.getElementById('paste-raw').value='';
+  modal.classList.add('on');
+  setTimeout(()=>document.getElementById('paste-raw').focus(),100);
+});
+document.getElementById('paste-cancel').addEventListener('click',()=>modal.classList.remove('on'));
+modal.addEventListener('click',e=>{ if(e.target===modal) modal.classList.remove('on'); });
+document.getElementById('paste-ok').addEventListener('click',()=>{
+  const v=document.getElementById('paste-raw').value;
+  modal.classList.remove('on');
+  addFromText(v,{focus:true});
+});
+
+/* ---------------- 準備 ---------------- */
+if('serviceWorker' in navigator){
+  window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+}
+if(navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(()=>{});
+
+boot();
+</script>
+</body>
+</html>
