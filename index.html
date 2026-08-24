@@ -471,6 +471,14 @@ function dayLabel(bd){
   const d=new Date(+bd.slice(0,4),+bd.slice(4,6)-1,+bd.slice(6,8));
   return `${d.getMonth()+1}月${d.getDate()}日（${WD[d.getDay()]}）`;
 }
+// 見出しは「そのまとまりに実際に入っている日付」で作る。
+// ひと晩が日をまたいだときだけ、両方の日を出す。
+function groupLabel(g){
+  if(!g.min || g.min==='00000000') return '日付なし';
+  if(g.min === g.max) return dayLabel(g.min);
+  const d2 = new Date(+g.max.slice(0,4), +g.max.slice(4,6)-1, +g.max.slice(6,8));
+  return `${dayLabel(g.min)} → ${d2.getDate()}日`;
+}
 function fullDate(r){
   const d=toDate(r.ymd,r.hm);
   if(!d) return '日付が読めませんでした';
@@ -521,13 +529,22 @@ function renderList(){
   }
 
   let html='', lastDay='';
-  const counts={};
-  rows.forEach(r=>{ const b=businessDay(r); counts[b]=(counts[b]||0)+1; });
+  const groups={};
+  rows.forEach(r=>{
+    const b = businessDay(r);
+    const g = groups[b] || (groups[b] = {n:0, min:null, max:null});
+    g.n++;
+    if(r.ymd){
+      if(!g.min || r.ymd < g.min) g.min = r.ymd;
+      if(!g.max || r.ymd > g.max) g.max = r.ymd;
+    }
+  });
 
   rows.forEach(r=>{
     const bd = businessDay(r);
     if(bd!==lastDay){
-      html += `<div class="daybar"><span>${dayLabel(bd)}</span><span class="n">${counts[bd]}件</span></div>`;
+      const g = groups[bd];
+      html += `<div class="daybar"><span>${groupLabel(g)}</span><span class="n">${g.n}件</span></div>`;
       lastDay = bd;
     }
     const n = visitNo(r);
