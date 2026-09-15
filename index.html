@@ -61,7 +61,18 @@ input,textarea{font:inherit;color:inherit}
   border-radius:var(--radius);padding:9px 12px;font-size:13px;color:var(--accent-dark);
   display:none;align-items:center;gap:10px;
 }
+.remind .t{flex:1 1 auto;min-width:0}
 .remind button{font-size:13px;font-weight:600;color:var(--accent-dark);text-decoration:underline;white-space:nowrap}
+/* メモがまだ端末の外にないとき。ボタンは1タップでダウンロードに保存 */
+.remind.memo{
+  background:var(--surface);border:0.5px solid var(--accent);border-left:3px solid var(--accent);
+  color:var(--ink);padding:10px 12px;flex-wrap:wrap;gap:6px 10px;
+}
+.remind.memo .t{font-weight:600}
+.remind.memo button{
+  background:var(--accent);color:#fff;text-decoration:none;border-radius:8px;padding:8px 14px;margin-left:auto;
+}
+.remind.memo button:active{background:var(--accent-dark)}
 
 /* ---- 一覧 ---- */
 .list{padding:8px 12px 96px}
@@ -157,6 +168,19 @@ input,textarea{font:inherit;color:inherit}
 .setrow select,.setrow input[type=number]{
   background:var(--field);border:0.5px solid var(--line);border-radius:8px;padding:7px 9px;font-size:14px;
 }
+/* 保存の保護（IndexedDBを端末が勝手に消さない設定）の状態。目立たせる */
+.guard{
+  display:none;align-items:flex-start;gap:10px;margin-top:12px;
+  border:0.5px solid;border-radius:var(--radius);padding:11px 12px;
+}
+.guard.on{display:flex}
+.guard .dot{flex:none;width:12px;height:12px;border-radius:50%;margin-top:6px}
+.guard .gt{font-size:15px;font-weight:600}
+.guard .gd{font-size:12px;margin-top:2px;line-height:1.7}
+.guard.ok{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-dark)}
+.guard.ok .dot{background:var(--accent)}
+.guard.ng{background:#FBE9E7;border-color:#C94F3D;color:#8A2A1F}
+.guard.ng .dot{background:#C94F3D}
 .howto{font-size:13px;color:var(--sub);line-height:1.9}
 .howto ol{padding-left:1.25em;margin:6px 0}
 .howto code{background:var(--surface2);padding:1px 5px;border-radius:4px;font-size:12px}
@@ -202,8 +226,7 @@ input,textarea{font:inherit;color:inherit}
   </div>
 
   <div class="remind" id="remind">
-    <span id="remind-text"></span>
-    <span class="spacer"></span>
+    <span class="t" id="remind-text"></span>
     <button id="remind-go">送る</button>
   </div>
 
@@ -280,6 +303,13 @@ input,textarea{font:inherit;color:inherit}
     <div class="panel">
       <div class="k" style="font-size:14px;font-weight:600">データ</div>
       <div class="eyebrow" style="margin-top:4px">中身はこの端末の中だけにあります。どこにも送られません。</div>
+      <div class="guard" id="guard">
+        <span class="dot" aria-hidden="true"></span>
+        <div>
+          <div class="gt" id="guard-t"></div>
+          <div class="gd" id="guard-d"></div>
+        </div>
+      </div>
       <div class="rowbtns" style="margin-top:12px">
         <button class="btn main wide" id="do-share">Driveなどへ送る</button>
         <button class="btn wide" id="do-export">ファイルに書き出す</button>
@@ -289,7 +319,6 @@ input,textarea{font:inherit;color:inherit}
       </div>
       <input type="file" id="file" accept="application/json,.json" hidden>
       <div class="eyebrow" id="export-state" style="margin-top:10px"></div>
-      <div class="eyebrow" id="persist-state" style="margin-top:4px"></div>
     </div>
 
     <div class="panel">
@@ -512,6 +541,7 @@ function toast(msg){
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
 function renderList(){
+  renderRemind();  // 一覧を描き直すたびに、催促も見直す（詳細から戻ったときなど）
   const q = document.getElementById('q').value.trim();
   document.getElementById('q-clear').style.display = q ? 'block' : 'none';
 
@@ -663,24 +693,51 @@ async function boot(){
   if(location.search) history.replaceState({}, '', location.pathname);
 }
 
+// 前回の書き出しより後に書いた（直した）メモ。これだけは原文からも作り直せない。
+function unsavedMemos(){
+  const last = SETTINGS.lastExport || 0;
+  return RECORDS.filter(r => r.memoAt && r.memoAt > last);
+}
+
 function renderRemind(){
   const box=document.getElementById('remind');
-  if(!RECORDS.length){ box.style.display='none'; return; }
+  const txt=document.getElementById('remind-text');
+  const btn=document.getElementById('remind-go');
   const last = SETTINGS.lastExport;
+  document.getElementById('export-state').textContent = last
+    ? `前回の書き出し：${new Date(last).toLocaleString('ja-JP',{year:'numeric',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}`
+    : 'まだ書き出していません';
+  if(!RECORDS.length){ box.style.display='none'; return; }
+
+  // 1. メモがまだ端末の外にない → 1タップでダウンロードに保存
+  const memos = unsavedMemos();
+  box.classList.toggle('memo', memos.length>0);
+  if(memos.length){
+    const newest = Math.max.apply(null, memos.map(r=>r.memoAt));
+    const recent = (Date.now()-newest) < 3600000;
+    txt.textContent = memos.length===1
+      ? (recent ? 'さっきのメモ、まだ端末の外にありません' : '書いたメモが、まだ端末の外にありません')
+      : `メモ${memos.length}件、まだ端末の外にありません`;
+    btn.textContent='ダウンロードに保存';
+    btn.onclick=()=>doExport();
+    box.style.display='flex';
+    return;
+  }
+
+  // 2. 記録が増えた・日がたった → 共有シートでDriveなどへ
+  btn.textContent='送る';
+  btn.onclick=()=>doShare();
   const days = last ? Math.floor((Date.now()-last)/86400000) : null;
   const fresh = last ? RECORDS.filter(r=>(r.createdAt||0) > last).length : RECORDS.length;
   if(days===null){
-    document.getElementById('remind-text').textContent='まだ一度も書き出していません';
+    txt.textContent='まだ一度も書き出していません';
     box.style.display='flex';
   }else if(days>=7 || fresh>=5){
-    document.getElementById('remind-text').textContent =
-      fresh ? `書き出してから${fresh}件ふえています` : `前の書き出しから${days}日たちました`;
+    txt.textContent = fresh ? `書き出してから${fresh}件ふえています` : `前の書き出しから${days}日たちました`;
     box.style.display='flex';
   }else{
     box.style.display='none';
   }
-  document.getElementById('export-state').textContent =
-    last ? `前回の書き出し：${new Date(last).toLocaleDateString('ja-JP')}` : 'まだ書き出していません';
 }
 
 function renderOffsets(){
@@ -708,8 +765,9 @@ function buildExport(){
     records: RECORDS
   };
   const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
-  const d = new Date();
-  const name = `log_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`;
+  // 時刻まで入れて、同じ日に何度書き出しても別のファイルになるようにする
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  const name = `log_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`;
   return {blob, name};
 }
 async function markExported(){
@@ -744,14 +802,18 @@ async function doShare(){
   }
 }
 async function renderPersist(){
-  const el=document.getElementById('persist-state');
-  if(!(navigator.storage && navigator.storage.persisted)){ el.textContent=''; return; }
+  const box=document.getElementById('guard');
+  if(!(navigator.storage && navigator.storage.persisted)){ box.classList.remove('on'); return; }
   let ok=false;
   try{ ok = await navigator.storage.persisted(); }catch(e){}
   if(!ok){ try{ ok = await navigator.storage.persist(); }catch(e){} }
-  el.textContent = ok
-    ? '保存の保護：有効（端末が勝手に消しにくい状態です）'
-    : '保存の保護：無効。端末の容量が減ると消されることがあります。こまめに送っておいてください';
+  box.classList.add('on');
+  box.classList.toggle('ok', ok);
+  box.classList.toggle('ng', !ok);
+  document.getElementById('guard-t').textContent = ok ? '保存の保護：有効' : '保存の保護：無効';
+  document.getElementById('guard-d').textContent = ok
+    ? '端末が勝手に消しにくい状態です'
+    : '端末の容量が減ると消されることがあります。ホーム画面に追加してあると有効になりやすいです。こまめに書き出しておいてください';
 }
 
 async function doImport(file){
@@ -795,11 +857,14 @@ document.getElementById('q-clear').addEventListener('click',()=>{
 document.getElementById('go-settings').addEventListener('click',()=>{ renderRemind(); renderPersist(); show('s-settings'); });
 document.getElementById('back-1').addEventListener('click',()=>{ renderList(); show('s-list'); });
 document.getElementById('back-2').addEventListener('click',()=>{ renderList(); show('s-list'); });
-document.getElementById('remind-go').addEventListener('click',doShare);
 
 document.getElementById('d-memo').addEventListener('input', e=>{
   if(!CURRENT) return;
-  CURRENT.memo = e.target.value; dbPut(CURRENT);
+  const v = e.target.value;
+  CURRENT.memo = v;
+  // いつ書いたかを覚えておく。書き出しより新しければ「まだ端末の外にない」と分かる
+  if(v.trim()) CURRENT.memoAt = Date.now(); else delete CURRENT.memoAt;
+  dbPut(CURRENT);
 });
 document.getElementById('d-raw').addEventListener('input', e=>{
   if(!CURRENT) return;
