@@ -204,6 +204,23 @@ input,textarea{font:inherit;color:inherit}
   z-index:80;opacity:0;pointer-events:none;transition:opacity .2s;max-width:88vw;text-align:center;
 }
 .toast.on{opacity:1}
+.toast.act{pointer-events:auto}
+.toast button{color:var(--badge);font-weight:600;margin-left:12px;text-decoration:underline}
+
+/* ---- 同じ番号のほかのメモ（詳細の中、折りたたみ） ---- */
+.foldbtn.hist{border-top:none;margin-top:8px;padding-top:0}
+.hist{background:var(--surface2);border:0.5px solid var(--line);border-radius:var(--radius);margin-top:6px;overflow:hidden}
+.histhead{display:block;width:100%;text-align:left;padding:9px 11px}
+.histhead .r{display:flex;align-items:center;gap:8px}
+.histdate{font-size:12px;color:var(--sub);flex:1;min-width:0}
+.histhead .caret{color:var(--muted);transition:transform .15s}
+.histhead[aria-expanded="true"] .caret{transform:rotate(90deg)}
+.histline{display:block;font-size:13px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.histhead[aria-expanded="true"] .histline{display:none}
+.histbody{display:none;padding:0 11px 10px;font-size:13px;line-height:1.75}
+.histbody.on{display:block}
+.histbody .memo{white-space:pre-wrap;word-break:break-word}
+.btn.small{padding:6px 10px;font-size:12px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
@@ -249,6 +266,11 @@ input,textarea{font:inherit;color:inherit}
 
       <div class="lbl">メモ</div>
       <textarea class="memofield" id="d-memo" placeholder="ここに書く"></textarea>
+
+      <button class="foldbtn hist" id="d-histbtn" aria-expanded="false" style="display:none">
+        <span class="caret" aria-hidden="true">›</span><span class="n"></span>
+      </button>
+      <div class="fold" id="d-hist"></div>
 
       <div class="grid" id="d-grid"></div>
 
@@ -517,6 +539,11 @@ function fullDate(r){
   if(!d) return '日付が読めませんでした';
   return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${WD[d.getDay()]}）${r.hm}`;
 }
+function shortDate(r){
+  const d=toDate(r.ymd,r.hm);
+  if(!d) return '日付なし';
+  return `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}（${WD[d.getDay()]}）${r.hm}`;
+}
 const sortKey = r => (r.ymd||'00000000')+(r.hm||'00:00');
 
 /* ---------------- 回数 ---------------- */
@@ -532,11 +559,39 @@ function show(id){
   document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('on',s.id===id));
   window.scrollTo(0,0);
 }
+
+// 画面の移動は履歴に積む。Androidの戻るジェスチャーで、アプリが閉じずに一覧へ戻れるように。
+// NAV = いま履歴の先頭にある画面。'modal' は貼り付けの窓が開いている状態。
+let NAV = 's-list', PENDING_PASTE = null;
+function go(id){
+  if(NAV !== id){ history.pushState({screen:id}, ''); NAV = id; }
+  show(id);
+}
+function goBack(){ history.back(); }
+window.addEventListener('popstate', e=>{
+  const st = e.state || {};
+  document.getElementById('paste').classList.remove('on');
+  if(st.modal){ NAV='modal'; document.getElementById('paste').classList.add('on'); return; }
+  NAV = st.screen || 's-list';
+  if(NAV==='s-list') renderList();
+  show(NAV);
+  // 貼り付けの窓を閉じてから追加する（窓の履歴を戻したあとに詳細を積む）
+  if(PENDING_PASTE!==null){ const t=PENDING_PASTE; PENDING_PASTE=null; addFromText(t,{focus:true}); }
+});
+
 let toastTimer;
-function toast(msg){
+// undo を渡すと「戻す」ボタン付きになり、少し長く出る
+function toast(msg, undo){
   const t=document.getElementById('toast');
-  t.textContent=msg; t.classList.add('on');
-  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('on'),2400);
+  t.textContent=msg;
+  t.classList.toggle('act', !!undo);
+  if(undo){
+    const b=document.createElement('button'); b.textContent='戻す';
+    b.addEventListener('click',()=>{ t.classList.remove('on'); undo(); });
+    t.appendChild(b);
+  }
+  t.classList.add('on');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('on'), undo?7000:2400);
 }
 const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 
@@ -616,12 +671,52 @@ function openDetail(id, focusMemo){
 
   document.getElementById('d-fold').setAttribute('aria-expanded','false');
   document.getElementById('d-foldbody').classList.remove('on');
-  show('s-detail');
+  renderHistory(r);
+  go('s-detail');
   if(focusMemo){
     const m=document.getElementById('d-memo');
     setTimeout(()=>{ m.focus(); m.setSelectionRange(m.value.length,m.value.length); },200);
   }
 }
+
+// 同じ会員番号のほかの記録を、詳細の中に折りたたんで出す。
+// 見出しは日付と1行目だけ。開くとメモの全文が読める。
+function renderHistory(r){
+  const btn=document.getElementById('d-histbtn'), box=document.getElementById('d-hist');
+  btn.setAttribute('aria-expanded','false'); box.classList.remove('on');
+  const others = r.no ? RECORDS.filter(x=>x.no===r.no && x.id!==r.id).sort((a,b)=>sortKey(a)<sortKey(b)?1:-1) : [];
+  if(!others.length){ btn.style.display='none'; box.innerHTML=''; return; }
+  btn.style.display='flex';
+  btn.querySelector('.n').textContent = `この番号のほかのメモ（${others.length}件）`;
+  box.innerHTML = others.map(x=>{
+    const first = (x.memo||'').split('\n').find(l=>l.trim()) || '';
+    const n = visitNo(x);
+    return `<div class="hist">
+      <button class="histhead" aria-expanded="false">
+        <span class="r"><span class="histdate">${esc(shortDate(x))}${n>1?`<span class="badge">${n}回目</span>`:''}</span><span class="caret" aria-hidden="true">›</span></span>
+        <span class="histline">${first ? esc(first) : '<span class="blank">メモ未記入</span>'}</span>
+      </button>
+      <div class="histbody">
+        <div class="memo">${x.memo ? esc(x.memo) : '<span class="blank">メモ未記入</span>'}</div>
+        <div class="rowbtns"><button class="btn small" data-open="${x.id}">この記録を開く</button></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+document.getElementById('d-histbtn').addEventListener('click', e=>{
+  const b=e.currentTarget, open=b.getAttribute('aria-expanded')==='true';
+  b.setAttribute('aria-expanded', String(!open));
+  document.getElementById('d-hist').classList.toggle('on', !open);
+});
+document.getElementById('d-hist').addEventListener('click', e=>{
+  const openBtn = e.target.closest('[data-open]');
+  if(openBtn){ openDetail(openBtn.dataset.open); return; }
+  const head = e.target.closest('.histhead');
+  if(!head) return;
+  const open = head.getAttribute('aria-expanded')==='true';
+  head.setAttribute('aria-expanded', String(!open));
+  head.nextElementSibling.classList.toggle('on', !open);
+});
 
 /* ---------------- 追加 ---------------- */
 function addOne(text){
@@ -662,7 +757,7 @@ function addFromText(raw, opts){
   }
 
   // まとめて来たとき: 一覧に戻して、メモは後から書いてもらう
-  show('s-list');
+  go('s-list');
   toast(`${added.length}件追加しました` + (dups.length ? `（${dups.length}件はもう入ってました）` : ''));
   return null;
 }
@@ -684,13 +779,15 @@ async function boot(){
   renderRemind();
   renderPersist();
 
+  // 履歴の土台は一覧。?shared=1 などが付いていても消しておく
+  history.replaceState({screen:'s-list'}, '', location.pathname);
+
   // 共有で届いた本文があれば取り込む
   const pend = await metaGet('pending');
   if(pend && pend.text){
     await metaDel('pending');
     addFromText(pend.text, {focus:true});
   }
-  if(location.search) history.replaceState({}, '', location.pathname);
 }
 
 // 前回の書き出しより後に書いた（直した）メモ。これだけは原文からも作り直せない。
@@ -827,6 +924,15 @@ async function doImport(file){
       RECORDS.push(r); await dbPut(r); added++;
     }
     if(data.offsets){ OFFSETS = Object.assign(data.offsets, OFFSETS); await metaPut({k:'offsets',v:OFFSETS}); }
+    // 区切り時刻と回数のしきい値も戻す（前回の書き出し日時は、この端末のものを保つ）
+    if(data.settings && typeof data.settings==='object'){
+      const s=data.settings;
+      if([0,1,2,3,4,5,6,7,8].includes(+s.cutoff)) SETTINGS.cutoff = +s.cutoff;
+      if([2,3,5,9999].includes(+s.threshold)) SETTINGS.threshold = +s.threshold;
+      await metaPut({k:'settings',v:SETTINGS});
+      document.getElementById('set-cutoff').value = SETTINGS.cutoff;
+      document.getElementById('set-threshold').value = SETTINGS.threshold;
+    }
     renderList(); renderOffsets();
     toast(`${added}件読み込みました${skipped?`（${skipped}件は既にありました）`:''}`);
   }catch(e){
@@ -854,9 +960,9 @@ kbdBtn.addEventListener('click', ()=>{
 document.getElementById('q-clear').addEventListener('click',()=>{
   qEl.value=''; renderList(); qEl.focus();
 });
-document.getElementById('go-settings').addEventListener('click',()=>{ renderRemind(); renderPersist(); show('s-settings'); });
-document.getElementById('back-1').addEventListener('click',()=>{ renderList(); show('s-list'); });
-document.getElementById('back-2').addEventListener('click',()=>{ renderList(); show('s-list'); });
+document.getElementById('go-settings').addEventListener('click',()=>{ renderRemind(); renderPersist(); go('s-settings'); });
+document.getElementById('back-1').addEventListener('click',goBack);
+document.getElementById('back-2').addEventListener('click',goBack);
 
 document.getElementById('d-memo').addEventListener('input', e=>{
   if(!CURRENT) return;
@@ -885,10 +991,16 @@ document.getElementById('d-reparse').addEventListener('click', async ()=>{
 });
 document.getElementById('d-del').addEventListener('click', async ()=>{
   if(!CURRENT) return;
-  if(!confirm('この記録を消します。戻せません。')) return;
-  await dbDel(CURRENT.id);
-  RECORDS = RECORDS.filter(r=>r.id!==CURRENT.id);
-  CURRENT=null; renderList(); show('s-list'); toast('消しました');
+  if(!confirm('この記録を消します。')) return;
+  const gone = CURRENT;
+  await dbDel(gone.id);
+  RECORDS = RECORDS.filter(r=>r.id!==gone.id);
+  CURRENT=null; goBack();
+  // 数秒だけ「戻す」で取り消せる
+  toast('消しました', async ()=>{
+    RECORDS.push(gone); await dbPut(gone);
+    renderList(); toast('戻しました');
+  });
 });
 
 document.getElementById('set-cutoff').addEventListener('change', async e=>{
@@ -914,18 +1026,21 @@ document.getElementById('file').addEventListener('change', e=>{
   const f=e.target.files[0]; if(f) doImport(f); e.target.value='';
 });
 
+// 貼り付けの窓も履歴に積む。戻るジェスチャーで窓だけ閉じる。
 const modal=document.getElementById('paste');
 document.getElementById('go-paste').addEventListener('click',()=>{
   document.getElementById('paste-raw').value='';
+  history.pushState({screen:'s-list', modal:true}, ''); NAV='modal';
   modal.classList.add('on');
   setTimeout(()=>document.getElementById('paste-raw').focus(),100);
 });
-document.getElementById('paste-cancel').addEventListener('click',()=>modal.classList.remove('on'));
-modal.addEventListener('click',e=>{ if(e.target===modal) modal.classList.remove('on'); });
+function closeModal(){ if(NAV==='modal') history.back(); else modal.classList.remove('on'); }
+document.getElementById('paste-cancel').addEventListener('click',closeModal);
+modal.addEventListener('click',e=>{ if(e.target===modal) closeModal(); });
 document.getElementById('paste-ok').addEventListener('click',()=>{
   const v=document.getElementById('paste-raw').value;
-  modal.classList.remove('on');
-  addFromText(v,{focus:true});
+  if(NAV==='modal'){ PENDING_PASTE=v; history.back(); }   // 閉じたあと popstate で追加する
+  else { modal.classList.remove('on'); addFromText(v,{focus:true}); }
 });
 
 /* ---------------- 準備 ---------------- */
