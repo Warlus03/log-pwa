@@ -204,7 +204,7 @@ input,textarea{font:inherit;color:inherit}
   <div class="remind" id="remind">
     <span id="remind-text"></span>
     <span class="spacer"></span>
-    <button id="remind-go">書き出す</button>
+    <button id="remind-go">送る</button>
   </div>
 
   <div class="list" id="list"></div>
@@ -281,11 +281,15 @@ input,textarea{font:inherit;color:inherit}
       <div class="k" style="font-size:14px;font-weight:600">データ</div>
       <div class="eyebrow" style="margin-top:4px">中身はこの端末の中だけにあります。どこにも送られません。</div>
       <div class="rowbtns" style="margin-top:12px">
-        <button class="btn main wide" id="do-export">書き出す</button>
+        <button class="btn main wide" id="do-share">Driveなどへ送る</button>
+        <button class="btn wide" id="do-export">ファイルに書き出す</button>
+      </div>
+      <div class="rowbtns" style="margin-top:8px">
         <button class="btn wide" id="do-import">読み込む</button>
       </div>
       <input type="file" id="file" accept="application/json,.json" hidden>
       <div class="eyebrow" id="export-state" style="margin-top:10px"></div>
+      <div class="eyebrow" id="persist-state" style="margin-top:4px"></div>
     </div>
 
     <div class="panel">
@@ -648,6 +652,7 @@ async function boot(){
   renderList();
   renderOffsets();
   renderRemind();
+  renderPersist();
 
   // 共有で届いた本文があれば取り込む
   const pend = await metaGet('pending');
@@ -663,11 +668,13 @@ function renderRemind(){
   if(!RECORDS.length){ box.style.display='none'; return; }
   const last = SETTINGS.lastExport;
   const days = last ? Math.floor((Date.now()-last)/86400000) : null;
+  const fresh = last ? RECORDS.filter(r=>(r.createdAt||0) > last).length : RECORDS.length;
   if(days===null){
     document.getElementById('remind-text').textContent='まだ一度も書き出していません';
     box.style.display='flex';
-  }else if(days>=30){
-    document.getElementById('remind-text').textContent=`前の書き出しから${days}日たちました`;
+  }else if(days>=7 || fresh>=5){
+    document.getElementById('remind-text').textContent =
+      fresh ? `書き出してから${fresh}件ふえています` : `前の書き出しから${days}日たちました`;
     box.style.display='flex';
   }else{
     box.style.display='none';
@@ -690,7 +697,7 @@ const HOWTO = [
  'アプリ本体は下のURLにあります。端末を変えても、そこから開き直せます。'
 ].join(' ');
 
-async function doExport(){
+function buildExport(){
   const data = {
     _よみかた: HOWTO,
     _アプリの場所: location.href.split('?')[0].split('#')[0],
@@ -703,14 +710,48 @@ async function doExport(){
   const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
   const d = new Date();
   const name = `log_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.json`;
+  return {blob, name};
+}
+async function markExported(){
+  SETTINGS.lastExport = Date.now();
+  await metaPut({k:'settings',v:SETTINGS});
+  renderRemind();
+}
+async function doExport(){
+  const {blob,name} = buildExport();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),4000);
-  SETTINGS.lastExport = Date.now();
-  await metaPut({k:'settings',v:SETTINGS});
-  renderRemind();
-  toast('書き出しました');
+  await markExported();
+  toast('書き出しました。ダウンロードに入っています');
+}
+// 共有シートからDriveなどに直接置く。対応していない端末ではダウンロードに切り替える。
+async function doShare(){
+  const {blob,name} = buildExport();
+  const file = new File([blob], name, {type:'application/json'});
+  if(navigator.share && navigator.canShare && navigator.canShare({files:[file]})){
+    try{
+      await navigator.share({files:[file], title:name});
+      await markExported();
+      toast('送りました');
+    }catch(e){
+      if(e && e.name==='AbortError') toast('やめました');
+      else { await doExport(); }
+    }
+  }else{
+    await doExport();
+  }
+}
+async function renderPersist(){
+  const el=document.getElementById('persist-state');
+  if(!(navigator.storage && navigator.storage.persisted)){ el.textContent=''; return; }
+  let ok=false;
+  try{ ok = await navigator.storage.persisted(); }catch(e){}
+  if(!ok){ try{ ok = await navigator.storage.persist(); }catch(e){} }
+  el.textContent = ok
+    ? '保存の保護：有効（端末が勝手に消しにくい状態です）'
+    : '保存の保護：無効。端末の容量が減ると消されることがあります。こまめに送っておいてください';
 }
 
 async function doImport(file){
@@ -751,10 +792,10 @@ kbdBtn.addEventListener('click', ()=>{
 document.getElementById('q-clear').addEventListener('click',()=>{
   qEl.value=''; renderList(); qEl.focus();
 });
-document.getElementById('go-settings').addEventListener('click',()=>{ renderRemind(); show('s-settings'); });
+document.getElementById('go-settings').addEventListener('click',()=>{ renderRemind(); renderPersist(); show('s-settings'); });
 document.getElementById('back-1').addEventListener('click',()=>{ renderList(); show('s-list'); });
 document.getElementById('back-2').addEventListener('click',()=>{ renderList(); show('s-list'); });
-document.getElementById('remind-go').addEventListener('click',doExport);
+document.getElementById('remind-go').addEventListener('click',doShare);
 
 document.getElementById('d-memo').addEventListener('input', e=>{
   if(!CURRENT) return;
@@ -802,6 +843,7 @@ document.getElementById('off-save').addEventListener('click', async ()=>{
 });
 
 document.getElementById('do-export').addEventListener('click',doExport);
+document.getElementById('do-share').addEventListener('click',doShare);
 document.getElementById('do-import').addEventListener('click',()=>document.getElementById('file').click());
 document.getElementById('file').addEventListener('change', e=>{
   const f=e.target.files[0]; if(f) doImport(f); e.target.value='';
