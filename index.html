@@ -208,7 +208,12 @@ input,textarea{font:inherit;color:inherit}
 .toast button{color:var(--badge);font-weight:600;margin-left:12px;text-decoration:underline}
 
 /* ---- 同じ番号のほかのメモ（詳細の中、折りたたみ） ---- */
-.foldbtn.hist{border-top:none;margin-top:8px;padding-top:0}
+.foldbtn.hist{
+  border-top:none;margin-top:10px;padding:8px 11px;
+  background:var(--accent-soft);border-left:3px solid var(--accent);border-radius:4px;
+  color:var(--accent-dark);font-weight:600;
+}
+.foldbtn.hist:active{background:var(--badge)}
 .hist{background:var(--surface2);border:0.5px solid var(--line);border-radius:var(--radius);margin-top:6px;overflow:hidden}
 .histhead{display:block;width:100%;text-align:left;padding:9px 11px}
 .histhead .r{display:flex;align-items:center;gap:8px}
@@ -662,9 +667,9 @@ function openDetail(id, focusMemo){
   document.getElementById('d-memo').value = r.memo||'';
   document.getElementById('d-raw').value = r.raw||'';
 
+  // 詳細に出す項目。合計・移動 向/戻・セット・割引は出さない（データには残っていて、LINE原文でも読める）
   const cells = [
-    ['場所',r.place,true],['合計',r.total,false],['移動 向',r.goA,false],['移動 戻',r.goB,false],
-    ['プラン',r.plan,true],['交通費',r.fare,false],['セット',r.set,false],['割引',r.off,false],['TEL',r.tel,true]
+    ['場所',r.place,true],['プラン',r.plan,true],['交通費',r.fare,false],['TEL',r.tel,false]
   ].filter(c=>c[1]);
   document.getElementById('d-grid').innerHTML = cells.map(([k,v,wide])=>
     `<div class="cell${wide?' wide':''}"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('');
