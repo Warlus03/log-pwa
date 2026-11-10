@@ -102,6 +102,13 @@ input,textarea{font:inherit;color:inherit}
   padding:2px 8px;border-radius:8px;margin-top:5px;
 }
 .empty{text-align:center;color:var(--muted);font-size:14px;padding:56px 24px;line-height:2}
+/* 記録が1件もないとき。控えから戻す道をここに出す */
+.restore{
+  background:var(--surface);border:0.5px solid var(--accent);border-left:3px solid var(--accent);
+  border-radius:var(--radius);padding:14px;margin-top:10px;
+}
+.restore .rt{font-size:15px;font-weight:600}
+.restore .rd{font-size:13px;color:var(--sub);line-height:1.8;margin-top:6px}
 
 /* ---- 追加ボタン ---- */
 .fab{
@@ -346,6 +353,7 @@ input,textarea{font:inherit;color:inherit}
       </div>
       <input type="file" id="file" accept="application/json,.json" hidden>
       <div class="eyebrow" id="export-state" style="margin-top:10px"></div>
+      <div class="eyebrow" id="auto-state" style="margin-top:4px"></div>
     </div>
 
     <div class="panel">
@@ -441,7 +449,7 @@ const metaGet = k =>tx('meta','readonly',s=>s.get(k));
 const metaPut = o =>tx('meta','readwrite',s=>s.put(o));
 const metaDel = k =>tx('meta','readwrite',s=>s.delete(k));
 
-let RECORDS=[], SETTINGS={cutoff:5,threshold:2,lastExport:null}, OFFSETS={}, CURRENT=null;
+let RECORDS=[], SETTINGS={cutoff:5,threshold:2,lastExport:null,lastAutoDay:null}, OFFSETS={}, CURRENT=null;
 
 /* ---------------- LINE本文を読む ---------------- */
 function parseText(raw){
@@ -526,6 +534,13 @@ function businessDay(r){
   if(d.getHours() < SETTINGS.cutoff) d.setDate(d.getDate()-1);
   return d.getFullYear()+String(d.getMonth()+1).padStart(2,'0')+String(d.getDate()).padStart(2,'0');
 }
+// いまが何日ぶんの仕事にあたるか。夜中の分は前の日として数えるので、
+// ひと晩の途中で日付が変わっても、控えは1つで済む。
+function todayKey(){
+  const d = new Date(), p = n => String(n).padStart(2,'0');
+  if(d.getHours() < SETTINGS.cutoff) d.setDate(d.getDate()-1);
+  return `${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}`;
+}
 function dayLabel(bd){
   if(bd==='00000000') return '日付なし';
   const d=new Date(+bd.slice(0,4),+bd.slice(4,6)-1,+bd.slice(6,8));
@@ -581,7 +596,9 @@ window.addEventListener('popstate', e=>{
   if(NAV==='s-list') renderList();
   show(NAV);
   // 貼り付けの窓を閉じてから追加する（窓の履歴を戻したあとに詳細を積む）
-  if(PENDING_PASTE!==null){ const t=PENDING_PASTE; PENDING_PASTE=null; addFromText(t,{focus:true}); }
+  if(PENDING_PASTE!==null){ const t=PENDING_PASTE; PENDING_PASTE=null; addFromText(t,{focus:true}); return; }
+  // 詳細から一覧に戻ってきた＝書き終わったとき。その日の控えがまだなら取る。
+  if(NAV==='s-list') maybeAutoBackup();
 });
 
 let toastTimer;
@@ -616,9 +633,18 @@ function renderList(){
 
   const box = document.getElementById('list');
   if(!rows.length){
-    box.innerHTML = `<div class="empty">${RECORDS.length
-      ? '見つかりませんでした。<br>番号なら前から、名前なら一部でも探せます。'
-      : 'まだ空です。<br>LINEの本文を共有するか、右下の＋から追加できます。'}</div>`;
+    if(RECORDS.length){
+      box.innerHTML = `<div class="empty">見つかりませんでした。<br>番号なら前から、名前なら一部でも探せます。</div>`;
+    }else{
+      // 1件もない。消えてしまったときのために、戻し方をここに出しておく。
+      box.innerHTML = `<div class="restore">
+        <div class="rt">記録がありません</div>
+        <div class="rd">前に使っていたのに空になっているときは、ダウンロードに残っている控えのファイルから戻せます。いまある記録が消えることはありません。</div>
+        <div class="rowbtns"><button class="btn main wide" id="restore-go">控えから戻す</button></div>
+        <div class="rd">はじめて使うときは、LINEの本文を共有するか、右下の＋から追加してください。</div>
+      </div>`;
+      document.getElementById('restore-go').addEventListener('click',()=>document.getElementById('file').click());
+    }
     return;
   }
 
@@ -764,6 +790,7 @@ function addFromText(raw, opts){
   // まとめて来たとき: 一覧に戻して、メモは後から書いてもらう
   go('s-list');
   toast(`${added.length}件追加しました` + (dups.length ? `（${dups.length}件はもう入ってました）` : ''));
+  if(added.length) setTimeout(maybeAutoBackup, 1200);
   return null;
 }
 
@@ -809,6 +836,9 @@ function renderRemind(){
   document.getElementById('export-state').textContent = last
     ? `前回の書き出し：${new Date(last).toLocaleString('ja-JP',{year:'numeric',month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})}`
     : 'まだ書き出していません';
+  document.getElementById('auto-state').textContent = SETTINGS.lastAutoDay === todayKey()
+    ? 'きょうのぶんの控えは、自動で保存ずみです'
+    : '記録を足すか書き換えたときに、その日の控えを1つだけ自動で保存します';
   if(!RECORDS.length){ box.style.display='none'; return; }
 
   // 1. メモがまだ端末の外にない → 1タップでダウンロードに保存
@@ -856,7 +886,29 @@ const HOWTO = [
  'アプリ本体は下のURLにあります。端末を変えても、そこから開き直せます。'
 ].join(' ');
 
-function buildExport(){
+// 前回の控え以降に、増えたり書き換えたりした記録の数
+function pendingCount(){
+  const last = SETTINGS.lastExport || 0;
+  return RECORDS.filter(r =>
+    (r.createdAt||0) > last || (r.memoAt||0) > last || (r.changedAt||0) > last).length;
+}
+
+// 記録を足したり書き換えたりしたあと、その日まだ控えを取っていなければ自動で1つ保存する。
+// 1日1つまで。日の区切りは設定の「1日の区切り」に合わせる。
+let AUTO_BUSY = false;
+async function maybeAutoBackup(){
+  if(AUTO_BUSY) return false;
+  if(!RECORDS.length) return false;
+  if(!pendingCount()) return false;
+  if(SETTINGS.lastAutoDay === todayKey()) return false;
+  AUTO_BUSY = true;
+  try{ await doExport({auto:true}); }
+  catch(e){ return false; }
+  finally{ AUTO_BUSY = false; }
+  return true;
+}
+
+function buildExport(auto){
   const data = {
     _よみかた: HOWTO,
     _アプリの場所: location.href.split('?')[0].split('#')[0],
@@ -867,9 +919,11 @@ function buildExport(){
     records: RECORDS
   };
   const blob = new Blob([JSON.stringify(data,null,2)],{type:'application/json'});
-  // 時刻まで入れて、同じ日に何度書き出しても別のファイルになるようにする
   const d = new Date(), p = n => String(n).padStart(2,'0');
-  const name = `log_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`;
+  // 自動の控えは1日1つなので日付だけ。手で書き出したぶんは時刻まで入れて、別物だと分かるようにする。
+  const name = auto
+    ? `log_backup_${todayKey()}.json`
+    : `log_${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`;
   return {blob, name};
 }
 async function markExported(){
@@ -877,14 +931,16 @@ async function markExported(){
   await metaPut({k:'settings',v:SETTINGS});
   renderRemind();
 }
-async function doExport(){
-  const {blob,name} = buildExport();
+async function doExport(opts){
+  const auto = !!(opts && opts.auto === true);
+  const {blob,name} = buildExport(auto);
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(()=>URL.revokeObjectURL(a.href),4000);
+  if(auto) SETTINGS.lastAutoDay = todayKey();
   await markExported();
-  toast('書き出しました。ダウンロードに入っています');
+  toast(auto ? 'きょうの控えをダウンロードに保存しました' : '書き出しました。ダウンロードに入っています');
 }
 // 共有シートからDriveなどに直接置く。対応していない端末ではダウンロードに切り替える。
 async function doShare(){
@@ -922,11 +978,22 @@ async function doImport(file){
   try{
     const data = JSON.parse(await file.text());
     if(!Array.isArray(data.records)) throw new Error('形式がちがいます');
-    let added=0, skipped=0;
+    // 読み込みは足すだけ。いまある記録は消さないし、書き換えもしない。
+    // 同じ記録が両方にあるときは、いま空いているところだけ控えの内容で埋める。
+    const FIELDS = ['no','name','nominate','tel','ymd','hm','place','goA','goB','plan','fare','set','off','total','raw'];
+    let added=0, filled=0, same=0;
     for(const r of data.records){
       const dup = RECORDS.find(x => (x.id===r.id) || (x.no && x.no===r.no && x.ymd===r.ymd && x.hm===r.hm));
-      if(dup){ skipped++; continue; }
-      RECORDS.push(r); await dbPut(r); added++;
+      if(!dup){ RECORDS.push(r); await dbPut(r); added++; continue; }
+      let touched=false;
+      for(const k of FIELDS){ if(!dup[k] && r[k]){ dup[k]=r[k]; touched=true; } }
+      const now=(dup.memo||'').trim(), old=(r.memo||'').trim();
+      if(old && !now){
+        dup.memo = r.memo; touched=true;                       // こちらが空なら控えのメモを入れる
+      }else if(old && now && !now.includes(old)){
+        dup.memo = dup.memo+'\n--- 控えにあった分 ---\n'+r.memo; touched=true;  // 両方あるなら下に足す
+      }
+      if(touched){ await dbPut(dup); filled++; } else same++;
     }
     if(data.offsets){ OFFSETS = Object.assign(data.offsets, OFFSETS); await metaPut({k:'offsets',v:OFFSETS}); }
     // 区切り時刻と回数のしきい値も戻す（前回の書き出し日時は、この端末のものを保つ）
@@ -939,7 +1006,8 @@ async function doImport(file){
       document.getElementById('set-threshold').value = SETTINGS.threshold;
     }
     renderList(); renderOffsets();
-    toast(`${added}件読み込みました${skipped?`（${skipped}件は既にありました）`:''}`);
+    const extra = [filled?`${filled}件は足りない所を補いました`:'', same?`${same}件は同じでした`:''].filter(Boolean).join('、');
+    toast(`${added}件読み込みました${extra?`（${extra}）`:''}`);
   }catch(e){
     toast('読み込めませんでした。ファイルを確かめてください');
   }
@@ -975,11 +1043,12 @@ document.getElementById('d-memo').addEventListener('input', e=>{
   CURRENT.memo = v;
   // いつ書いたかを覚えておく。書き出しより新しければ「まだ端末の外にない」と分かる
   if(v.trim()) CURRENT.memoAt = Date.now(); else delete CURRENT.memoAt;
+  CURRENT.changedAt = Date.now();
   dbPut(CURRENT);
 });
 document.getElementById('d-raw').addEventListener('input', e=>{
   if(!CURRENT) return;
-  CURRENT.raw = e.target.value; dbPut(CURRENT);
+  CURRENT.raw = e.target.value; CURRENT.changedAt = Date.now(); dbPut(CURRENT);
 });
 document.getElementById('d-fold').addEventListener('click', e=>{
   const b=e.currentTarget, open=b.getAttribute('aria-expanded')==='true';
@@ -989,6 +1058,7 @@ document.getElementById('d-fold').addEventListener('click', e=>{
 document.getElementById('d-reparse').addEventListener('click', async ()=>{
   if(!CURRENT) return;
   Object.assign(CURRENT, parseText(CURRENT.raw));
+  CURRENT.changedAt = Date.now();
   await dbPut(CURRENT);
   openDetail(CURRENT.id);
   document.getElementById('d-fold').click();
@@ -1024,7 +1094,7 @@ document.getElementById('off-save').addEventListener('click', async ()=>{
   renderOffsets(); renderList(); toast('足しました');
 });
 
-document.getElementById('do-export').addEventListener('click',doExport);
+document.getElementById('do-export').addEventListener('click',()=>doExport());
 document.getElementById('do-share').addEventListener('click',doShare);
 document.getElementById('do-import').addEventListener('click',()=>document.getElementById('file').click());
 document.getElementById('file').addEventListener('change', e=>{
