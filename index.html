@@ -109,6 +109,9 @@ input,textarea{font:inherit;color:inherit}
 }
 .restore .rt{font-size:15px;font-weight:600}
 .restore .rd{font-size:13px;color:var(--sub);line-height:1.8;margin-top:6px}
+.restore.bad{background:#FBE9E7;border-color:#C94F3D;border-left-color:#C94F3D}
+.restore.bad .rt{color:#8A2A1F}
+.restore.bad .rd{color:#8A2A1F}
 
 /* ---- 追加ボタン ---- */
 .fab{
@@ -212,6 +215,15 @@ input,textarea{font:inherit;color:inherit}
 }
 .toast.on{opacity:1}
 .toast.act{pointer-events:auto}
+/* 保存に失敗したときだけ出る帯。黙って消えるのがいちばん困るので、画面の一番上に赤で出す */
+.savefail{
+  position:fixed;left:0;right:0;top:0;z-index:95;display:none;
+  background:#C94F3D;color:#fff;align-items:flex-start;gap:10px;
+  padding:calc(9px + env(safe-area-inset-top)) 12px 9px;font-size:13px;line-height:1.6;
+}
+.savefail.on{display:flex}
+.savefail .t{flex:1;min-width:0}
+.savefail button{color:#fff;font-weight:600;text-decoration:underline;white-space:nowrap;flex:none}
 .toast button{color:var(--badge);font-weight:600;margin-left:12px;text-decoration:underline}
 
 /* ---- 同じ番号のほかのメモ（詳細の中、折りたたみ） ---- */
@@ -399,6 +411,11 @@ input,textarea{font:inherit;color:inherit}
   </div>
 </div>
 
+<div class="savefail" id="savefail">
+  <span class="t" id="savefail-t"></span>
+  <button id="savefail-x">閉じる</button>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -448,6 +465,30 @@ const dbDel   = id=>tx('records','readwrite',s=>s.delete(id));
 const metaGet = k =>tx('meta','readonly',s=>s.get(k));
 const metaPut = o =>tx('meta','readwrite',s=>s.put(o));
 const metaDel = k =>tx('meta','readwrite',s=>s.delete(k));
+
+/* ---------------- 保存の失敗を知らせる ----------------
+   メモは原文から作り直せない唯一のデータ。保存に失敗したまま黙っているのが
+   いちばん困るので、失敗したらその場で赤い帯を出し、次に成功するまで消さない。 */
+let SAVE_FAIL = 0, BOOT_FAILED = false;
+function renderSaveFail(){
+  const box = document.getElementById('savefail');
+  if(!SAVE_FAIL){ box.classList.remove('on'); return; }
+  document.getElementById('savefail-t').textContent = SAVE_FAIL===1
+    ? '保存できませんでした。いま書いた内容は、まだ端末に入っていません。端末の空き容量を確かめてください。'
+    : `保存できていません（${SAVE_FAIL}回）。端末の空き容量を確かめてください。`;
+  box.classList.add('on');
+}
+// 記録を1件保存する。成功したら true。失敗しても例外は投げず、帯で知らせる。
+async function saveRecord(r){
+  try{
+    await dbPut(r);
+    if(SAVE_FAIL){ SAVE_FAIL = 0; renderSaveFail(); }
+    return true;
+  }catch(e){
+    SAVE_FAIL++; renderSaveFail();
+    return false;
+  }
+}
 
 let RECORDS=[], SETTINGS={cutoff:5,threshold:2,lastExport:null,lastAutoDay:null}, OFFSETS={}, CURRENT=null;
 
@@ -633,7 +674,14 @@ function renderList(){
 
   const box = document.getElementById('list');
   if(!rows.length){
-    if(RECORDS.length){
+    if(BOOT_FAILED){
+      // 開けなかっただけで、記録は残っているかもしれない。ここで読み込ませると二重になる。
+      box.innerHTML = `<div class="restore bad">
+        <div class="rt">データ置き場を開けませんでした</div>
+        <div class="rd">記録が残っているかどうか、いまは分かりません。<strong>この画面で「控えから戻す」をしないでください。</strong>二重に入ってしまうことがあります。</div>
+        <div class="rd">まず端末の空き容量を空けて、アプリを開き直してください。それでも空のままのときだけ、設定から控えを読み込んでください。</div>
+      </div>`;
+    }else if(RECORDS.length){
       box.innerHTML = `<div class="empty">見つかりませんでした。<br>番号なら前から、名前なら一部でも探せます。</div>`;
     }else{
       // 1件もない。消えてしまったときのために、戻し方をここに出しておく。
@@ -750,7 +798,8 @@ document.getElementById('d-hist').addEventListener('click', e=>{
 });
 
 /* ---------------- 追加 ---------------- */
-function addOne(text){
+// 保存できたものだけを一覧に足す。画面にあるのに端末に無い、という状態を作らない。
+async function addOne(text){
   const p = parseText(text);
   const dup = RECORDS.find(r=>r.no && r.no===p.no && r.ymd===p.ymd && r.hm===p.hm);
   if(dup) return {dup:dup};
@@ -758,47 +807,59 @@ function addOne(text){
     id: Date.now().toString(36)+Math.random().toString(36).slice(2,7),
     memo:'', raw:text, createdAt:Date.now()
   }, p);
+  if(!await saveRecord(rec)) return {failed:true};
   RECORDS.push(rec);
-  dbPut(rec);
   return {rec:rec};
 }
 
-function addFromText(raw, opts){
+async function addFromText(raw, opts){
   const text = String(raw||'').trim();
-  if(!text){ toast('本文が空でした'); return null; }
+  if(!text){ toast('本文が空でした'); return {added:0,dups:0,failed:0}; }
 
   const blocks = splitBlocks(text);
   const added = [], dups = [];
-  blocks.forEach(b=>{
-    const r = addOne(b);
-    if(r.rec) added.push(r.rec); else dups.push(r.dup);
-  });
+  let failed = 0;
+  for(const b of blocks){
+    const r = await addOne(b);
+    if(r.rec) added.push(r.rec); else if(r.dup) dups.push(r.dup); else failed++;
+  }
   renderList();
+  const result = {added:added.length, dups:dups.length, failed};
+
+  // 1件も入らなかった。赤い帯が出ているので、ここでは重ねて言わない。
+  if(!added.length && !dups.length) return result;
 
   // 1件だけのとき: そのまま詳細を開いてメモを書ける状態にする
   if(blocks.length === 1){
     if(added.length){
       if(!added[0].no && !added[0].ymd) toast('項目が読めなかったので、原文だけ残しました');
       openDetail(added[0].id, opts && opts.focus);
-      return added[0];
+      return result;
     }
     toast('もう入ってます');
     openDetail(dups[0].id);
-    return null;
+    return result;
   }
 
   // まとめて来たとき: 一覧に戻して、メモは後から書いてもらう
   go('s-list');
-  toast(`${added.length}件追加しました` + (dups.length ? `（${dups.length}件はもう入ってました）` : ''));
+  toast(`${added.length}件追加しました`
+    + (dups.length ? `（${dups.length}件はもう入ってました）` : '')
+    + (failed ? `（${failed}件は保存できませんでした）` : ''));
   if(added.length) setTimeout(maybeAutoBackup, 1200);
-  return null;
+  return result;
 }
 
 /* ---------------- 起動 ---------------- */
 async function boot(){
-  const s = await metaGet('settings'); if(s) SETTINGS = Object.assign(SETTINGS, s.v||{});
-  const o = await metaGet('offsets');  if(o) OFFSETS = o.v||{};
-  RECORDS = await dbAll();
+  // データ置き場が開けないことがある。そのときは空っぽに見えるので、黙って進まない。
+  try{
+    const s = await metaGet('settings'); if(s) SETTINGS = Object.assign(SETTINGS, s.v||{});
+    const o = await metaGet('offsets');  if(o) OFFSETS = o.v||{};
+    RECORDS = await dbAll();
+  }catch(e){
+    BOOT_FAILED = true; RECORDS = [];
+  }
 
   const sel=document.getElementById('set-cutoff');
   sel.innerHTML = [0,1,2,3,4,5,6,7,8].map(h=>`<option value="${h}">朝${h}時</option>`).join('');
@@ -814,11 +875,16 @@ async function boot(){
   // 履歴の土台は一覧。?shared=1 などが付いていても消しておく
   history.replaceState({screen:'s-list'}, '', location.pathname);
 
-  // 共有で届いた本文があれば取り込む
-  const pend = await metaGet('pending');
+  // データ置き場が怪しいときは、共有の取り込みをしない（上書きで悪化させないため）
+  if(BOOT_FAILED) return;
+
+  // 共有で届いた本文があれば取り込む。
+  // 取り込めたことを確かめてから一時保管を消す。失敗したら次に開いたときにもう一度試す。
+  let pend = null;
+  try{ pend = await metaGet('pending'); }catch(e){}
   if(pend && pend.text){
-    await metaDel('pending');
-    addFromText(pend.text, {focus:true});
+    const res = await addFromText(pend.text, {focus:true});
+    if(res && !res.failed){ try{ await metaDel('pending'); }catch(e){} }
   }
 }
 
@@ -1044,11 +1110,11 @@ document.getElementById('d-memo').addEventListener('input', e=>{
   // いつ書いたかを覚えておく。書き出しより新しければ「まだ端末の外にない」と分かる
   if(v.trim()) CURRENT.memoAt = Date.now(); else delete CURRENT.memoAt;
   CURRENT.changedAt = Date.now();
-  dbPut(CURRENT);
+  saveRecord(CURRENT);
 });
 document.getElementById('d-raw').addEventListener('input', e=>{
   if(!CURRENT) return;
-  CURRENT.raw = e.target.value; CURRENT.changedAt = Date.now(); dbPut(CURRENT);
+  CURRENT.raw = e.target.value; CURRENT.changedAt = Date.now(); saveRecord(CURRENT);
 });
 document.getElementById('d-fold').addEventListener('click', e=>{
   const b=e.currentTarget, open=b.getAttribute('aria-expanded')==='true';
@@ -1059,7 +1125,7 @@ document.getElementById('d-reparse').addEventListener('click', async ()=>{
   if(!CURRENT) return;
   Object.assign(CURRENT, parseText(CURRENT.raw));
   CURRENT.changedAt = Date.now();
-  await dbPut(CURRENT);
+  await saveRecord(CURRENT);
   openDetail(CURRENT.id);
   document.getElementById('d-fold').click();
   toast('原文から読み直しました');
@@ -1073,7 +1139,7 @@ document.getElementById('d-del').addEventListener('click', async ()=>{
   CURRENT=null; goBack();
   // 数秒だけ「戻す」で取り消せる
   toast('消しました', async ()=>{
-    RECORDS.push(gone); await dbPut(gone);
+    if(await saveRecord(gone)) RECORDS.push(gone);
     renderList(); toast('戻しました');
   });
 });
@@ -1094,6 +1160,9 @@ document.getElementById('off-save').addEventListener('click', async ()=>{
   renderOffsets(); renderList(); toast('足しました');
 });
 
+document.getElementById('savefail-x').addEventListener('click',()=>{
+  document.getElementById('savefail').classList.remove('on');  // 次に失敗したらまた出る
+});
 document.getElementById('do-export').addEventListener('click',()=>doExport());
 document.getElementById('do-share').addEventListener('click',doShare);
 document.getElementById('do-import').addEventListener('click',()=>document.getElementById('file').click());

@@ -8,7 +8,9 @@
 // GitHubのサーバーにリクエストとして届いてしまう。POSTをここで横取りすれば、
 // 本文は一度も通信に乗らず、端末の中だけで完結します。
 
-const CACHE = 'log-v2';
+const CACHE = 'log-v3';
+// ネットの返事をこれ以上待たない。電波が弱いときは控えを先に出す。
+const NET_WAIT = 3500;
 const ASSETS = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -74,19 +76,52 @@ self.addEventListener('fetch', (e) => {
   const isPage = e.request.mode === 'navigate' || /\.(html|json|js)$/.test(url.pathname) || url.pathname.endsWith('/');
 
   if (isPage) {
-    // 本体は新しいものを取りに行く。取れなければ控えを出す。
-    e.respondWith(
-      fetch(e.request)
-        .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(e.request, copy)).catch(() => {});
-          return res;
-        })
-        .catch(() => caches.match(e.request).then((hit) => hit || caches.match('./index.html')))
-    );
+    e.respondWith(pageFirst(e.request));
     return;
   }
 
   // 画像などは控えを先に出す（変わらないので）
   e.respondWith(caches.match(e.request).then((hit) => hit || fetch(e.request)));
 });
+
+// 「?shared=1」などが付いていても、控えの「./」や「./index.html」で代用する
+function fromCache(req) {
+  return caches.match(req, { ignoreSearch: true })
+    .then((hit) => hit || caches.match('./index.html', { ignoreSearch: true }));
+}
+
+// 控えとして保存してよい返事かどうか。
+// エラーページ（404など）を控えにしてしまうと、次に圏外で開いたときエラーが出て
+// アプリが二度と開けなくなる。だから成功した返事だけを控えにする。
+function worthCaching(res) {
+  return !!res && res.ok && res.status === 200 && res.type !== 'opaque' && !res.redirected;
+}
+
+// 本体は新しいものを取りに行く。ただし待つのは NET_WAIT まで。
+// それを過ぎたら控えを先に出して、ネットの返事は裏で控えの更新だけに使う。
+function pageFirst(req) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (res) => { if (!done && res) { done = true; resolve(res); } };
+
+    const timer = setTimeout(() => { fromCache(req).then(finish); }, NET_WAIT);
+
+    fetch(req).then((res) => {
+      clearTimeout(timer);
+      if (worthCaching(res)) {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+        finish(res);
+      } else {
+        // エラーだった。控えがあればそちらを出す。無ければエラーをそのまま返す。
+        fromCache(req).then((hit) => finish(hit || res));
+      }
+    }).catch(() => {
+      clearTimeout(timer);
+      fromCache(req).then((hit) => finish(hit || new Response(
+        'つながりませんでした。電波の良いところでもう一度開いてください。',
+        { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }
+      )));
+    });
+  });
+}
